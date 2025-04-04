@@ -1,6 +1,7 @@
 import { useInputControl } from '@conform-to/react'
+import { FormScope, useField, ValueOfInputType } from '@rvf/react-router'
 import { REGEXP_ONLY_DIGITS_AND_CHARS, type OTPInputProps } from 'input-otp'
-import React, { useId } from 'react'
+import React, { ComponentPropsWithRef, useId } from 'react'
 import { Checkbox, type CheckboxProps } from './ui/checkbox.tsx'
 import {
 	InputOTP,
@@ -61,6 +62,31 @@ export function Field({
 				{errorId ? <ErrorList id={errorId} errors={errors} /> : null}
 			</div>
 		</div>
+	)
+}
+
+// Based on the recipe here: https://www.rvf-js.io/recipes/typesafe-input#recipe
+// This sort of abstraction isn't necessary, but I like having it for type safety
+// and a little terseness in the form itself.
+type BaseInputProps = Omit<ComponentPropsWithRef<'input'>, 'type'>
+type RvfFieldProps<InputType extends string> = {
+	labelProps: React.LabelHTMLAttributes<HTMLLabelElement>
+	inputProps: BaseInputProps & { type: InputType }
+	className?: string
+	scope: FormScope<ValueOfInputType<InputType>>
+}
+export function RvfField<Type extends string>({
+	scope,
+	inputProps,
+	...rest
+}: RvfFieldProps<Type>) {
+	const field = useField(scope)
+	return (
+		<Field
+			inputProps={field.getInputProps(inputProps)}
+			errors={[field.error()].filter(Boolean)}
+			{...rest}
+		/>
 	)
 }
 
@@ -135,6 +161,25 @@ export function TextareaField({
 				{errorId ? <ErrorList id={errorId} errors={errors} /> : null}
 			</div>
 		</div>
+	)
+}
+export function RvfTextareaField({
+	scope,
+	textareaProps,
+	...rest
+}: {
+	labelProps: React.LabelHTMLAttributes<HTMLLabelElement>
+	textareaProps?: React.TextareaHTMLAttributes<HTMLTextAreaElement>
+	className?: string
+	scope: FormScope<string>
+}) {
+	const field = useField(scope)
+	return (
+		<TextareaField
+			textareaProps={field.getInputProps(textareaProps)}
+			errors={[field.error()].filter(Boolean)}
+			{...rest}
+		/>
 	)
 }
 

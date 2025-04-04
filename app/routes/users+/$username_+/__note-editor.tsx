@@ -1,26 +1,22 @@
-import {
-	FormProvider,
-	getFieldsetProps,
-	getFormProps,
-	getInputProps,
-	getTextareaProps,
-	useForm,
-	type FieldMetadata,
-} from '@conform-to/react'
-import { getZodConstraint, parseWithZod } from '@conform-to/zod'
-import { Img } from 'openimg/react'
-import { useState } from 'react'
-import { Form } from 'react-router'
-import { z } from 'zod'
 import { GeneralErrorBoundary } from '#app/components/error-boundary.tsx'
 import { floatingToolbarClassName } from '#app/components/floating-toolbar.tsx'
-import { ErrorList, Field, TextareaField } from '#app/components/forms.tsx'
+import {
+	ErrorList,
+	RvfField,
+	RvfTextareaField,
+} from '#app/components/forms.tsx'
 import { Button } from '#app/components/ui/button.tsx'
 import { Icon } from '#app/components/ui/icon.tsx'
 import { Label } from '#app/components/ui/label.tsx'
 import { StatusButton } from '#app/components/ui/status-button.tsx'
 import { Textarea } from '#app/components/ui/textarea.tsx'
 import { cn, getNoteImgSrc, useIsPending } from '#app/utils/misc.tsx'
+import { FormScope, useForm, useFormScope } from '@rvf/react-router'
+import { withZod } from '@rvf/zod'
+import { Img } from 'openimg/react'
+import { useId, useState } from 'react'
+import { Form } from 'react-router'
+import { z } from 'zod'
 import { type Info } from './+types/notes.$noteId_.edit.ts'
 
 const titleMinLength = 1
@@ -42,6 +38,9 @@ const ImageFieldsetSchema = z.object({
 })
 
 export type ImageFieldset = z.infer<typeof ImageFieldsetSchema>
+type ImageFieldsetWithObjectKey = ImageFieldset & {
+	objectKey: string | undefined
+}
 
 export const NoteEditorSchema = z.object({
 	id: z.string().optional(),
@@ -49,147 +48,165 @@ export const NoteEditorSchema = z.object({
 	content: z.string().min(contentMinLength).max(contentMaxLength),
 	images: z.array(ImageFieldsetSchema).max(5).optional(),
 })
+export const noteEditorValidator = withZod(NoteEditorSchema)
 
-export function NoteEditor({
-	note,
-	actionData,
-}: {
-	note?: Info['loaderData']['note']
-	actionData?: Info['actionData']
-}) {
-	const isPending = useIsPending()
-
-	const [form, fields] = useForm({
+export function NoteEditor({ note }: { note?: Info['loaderData']['note'] }) {
+	const form = useForm({
 		id: 'note-editor',
-		constraint: getZodConstraint(NoteEditorSchema),
-		lastResult: actionData?.result,
-		onValidate({ formData }) {
-			return parseWithZod(formData, { schema: NoteEditorSchema })
-		},
-		defaultValue: {
+		method: 'POST',
+		encType: 'multipart/form-data',
+
+		validator: noteEditorValidator,
+		defaultValues: {
 			...note,
-			images: note?.images ?? [{}],
+			// Default values get used for the types inside the form, so I like to spell things out explicitly
+			title: note?.title ?? '',
+			content: note?.content ?? '',
+			images: note?.images?.map((image) => ({
+				id: image.id,
+				objectKey: image.objectKey,
+				altText: image.altText ?? '',
+				file: undefined as File | undefined,
+			})) ?? [
+				{
+					id: undefined as string | undefined,
+					objectKey: undefined as string | undefined,
+					altText: '',
+					file: undefined as File | undefined,
+				},
+			],
 		},
-		shouldRevalidate: 'onBlur',
+
+		// This is the default value, but I included it to highlight that
+		// you can configure different behaviors based on form/field state.
+		validationBehaviorConfig: {
+			initial: 'onBlur',
+			whenTouched: 'onChange',
+			whenSubmitted: 'onSubmit',
+		},
 	})
-	const imageList = fields.images.getFieldList()
+	const images = form.array('images')
 
 	return (
 		<div className="absolute inset-0">
-			<FormProvider context={form.context}>
-				<Form
-					method="POST"
-					className="flex h-full flex-col gap-y-4 overflow-x-hidden overflow-y-auto px-10 pt-12 pb-28"
-					{...getFormProps(form)}
-					encType="multipart/form-data"
-				>
-					{/*
+			{/* There's a context provider in RVF if you want, but you dont really need it. */}
+			<Form
+				className="flex h-full flex-col gap-y-4 overflow-x-hidden overflow-y-auto px-10 pt-12 pb-28"
+				{...form.getFormProps()}
+			>
+				{/*
 					This hidden submit button is here to ensure that when the user hits
 					"enter" on an input field, the primary form function is submitted
 					rather than the first button in the form (which is delete/add image).
 				*/}
-					<button type="submit" className="hidden" />
-					{note ? <input type="hidden" name="id" value={note.id} /> : null}
-					<div className="flex flex-col gap-1">
-						<Field
-							labelProps={{ children: 'Title' }}
-							inputProps={{
-								autoFocus: true,
-								...getInputProps(fields.title, { type: 'text' }),
-							}}
-							errors={fields.title.errors}
-						/>
-						<TextareaField
-							labelProps={{ children: 'Content' }}
-							textareaProps={{
-								...getTextareaProps(fields.content),
-							}}
-							errors={fields.content.errors}
-						/>
-						<div>
-							<Label>Images</Label>
-							<ul className="flex flex-col gap-4">
-								{imageList.map((imageMeta, index) => {
-									const image = note?.images[index]
-									return (
-										<li
-											key={imageMeta.key}
-											className="border-muted-foreground relative border-b-2"
+				{note ? <input {...form.getHiddenInputProps('id')} /> : null}
+				<div className="flex flex-col gap-1">
+					<RvfField
+						labelProps={{ children: 'Title' }}
+						scope={form.scope('title')}
+						inputProps={{
+							autoFocus: true,
+							type: 'text',
+						}}
+					/>
+					<RvfTextareaField
+						labelProps={{ children: 'Content' }}
+						scope={form.scope('content')}
+					/>
+					<div>
+						<Label>Images</Label>
+						<ul className="flex flex-col gap-4">
+							{images.map((key, image, index) => {
+								return (
+									<li
+										key={image.value('id') ?? key}
+										className="border-muted-foreground relative border-b-2"
+									>
+										<button
+											className="text-foreground-destructive absolute top-0 right-0"
+											type="button"
+											onClick={() => images.remove(index)}
 										>
-											<button
-												className="text-foreground-destructive absolute top-0 right-0"
-												{...form.remove.getButtonProps({
-													name: fields.images.name,
-													index,
-												})}
-											>
-												<span aria-hidden>
-													<Icon name="cross-1" />
-												</span>{' '}
-												<span className="sr-only">
-													Remove image {index + 1}
-												</span>
-											</button>
-											<ImageChooser
-												meta={imageMeta}
-												objectKey={image?.objectKey}
-											/>
-										</li>
-									)
-								})}
-							</ul>
-						</div>
-						<Button
-							className="mt-3"
-							{...form.insert.getButtonProps({ name: fields.images.name })}
-						>
-							<span aria-hidden>
-								<Icon name="plus">Image</Icon>
-							</span>{' '}
-							<span className="sr-only">Add image</span>
-						</Button>
+											<span aria-hidden>
+												<Icon name="cross-1" />
+											</span>{' '}
+											<span className="sr-only">Remove image {index + 1}</span>
+										</button>
+										<ImageChooser scope={image.scope()} />
+									</li>
+								)
+							})}
+						</ul>
 					</div>
-					<ErrorList id={form.errorId} errors={form.errors} />
-				</Form>
-				<div className={floatingToolbarClassName}>
-					<Button variant="destructive" {...form.reset.getButtonProps()}>
-						Reset
-					</Button>
-					<StatusButton
-						form={form.id}
-						type="submit"
-						disabled={isPending}
-						status={isPending ? 'pending' : 'idle'}
+					<Button
+						className="mt-3"
+						type="button"
+						onClick={() =>
+							images.push({
+								id: undefined,
+								altText: '',
+								objectKey: undefined,
+								file: undefined,
+							})
+						}
 					>
-						Submit
-					</StatusButton>
+						<span aria-hidden>
+							<Icon name="plus">Image</Icon>
+						</span>{' '}
+						<span className="sr-only">Add image</span>
+					</Button>
 				</div>
-			</FormProvider>
+				{/* I don't know what this is. Is this form-level errors?
+				  RVF doesn't currently support that, but it's a common request.
+				<ErrorList id={conform.errorId} errors={conform.errors} /> */}
+			</Form>
+			<div className={floatingToolbarClassName}>
+				<Button
+					variant="destructive"
+					type="reset"
+					form={form.formOptions.formId}
+				>
+					Reset
+				</Button>
+				<StatusButton
+					form={form.formOptions.formId}
+					type="submit"
+					disabled={form.formState.isSubmitting}
+					status={form.formState.isSubmitting ? 'pending' : 'idle'}
+				>
+					Submit
+				</StatusButton>
+			</div>
 		</div>
 	)
 }
 
 function ImageChooser({
-	meta,
-	objectKey,
+	scope,
 }: {
-	meta: FieldMetadata<ImageFieldset>
-	objectKey: string | undefined
+	scope: FormScope<ImageFieldsetWithObjectKey>
 }) {
-	const fields = meta.getFieldset()
-	const existingImage = Boolean(fields.id.initialValue)
+	const form = useFormScope(scope)
+	const existingImage = Boolean(form.defaultValue('id'))
+	const objectKey = form.value('objectKey')
 	const [previewImage, setPreviewImage] = useState<string | null>(
 		objectKey ? getNoteImgSrc(objectKey) : null,
 	)
-	const [altText, setAltText] = useState(fields.altText.initialValue ?? '')
+
+	// RVF leaves this part up to a userland implementation,
+	// but you'd probably have an actual abstraction for this instead of doing this manually in the form.
+	const fileFieldId = useId()
+	const fileErrorId = useId()
+	const altTextFieldId = useId()
+	const altTextErrorId = useId()
 
 	return (
-		<fieldset {...getFieldsetProps(meta)}>
+		<fieldset>
 			<div className="flex gap-3">
 				<div className="w-32">
 					<div className="relative size-32">
 						<label
-							htmlFor={fields.file.id}
+							htmlFor={fileFieldId}
 							className={cn('group absolute size-32 rounded-lg', {
 								'bg-accent opacity-40 focus-within:opacity-100 hover:opacity-100':
 									!previewImage,
@@ -201,7 +218,7 @@ function ImageChooser({
 									{existingImage ? (
 										<Img
 											src={previewImage}
-											alt={altText ?? ''}
+											alt={form.value('altText')}
 											className="size-32 rounded-lg object-cover"
 											width={512}
 											height={512}
@@ -209,7 +226,7 @@ function ImageChooser({
 									) : (
 										<img
 											src={previewImage}
-											alt={altText ?? ''}
+											alt={form.value('altText')}
 											className="size-32 rounded-lg object-cover"
 										/>
 									)}
@@ -225,9 +242,10 @@ function ImageChooser({
 								</div>
 							)}
 							{existingImage ? (
-								<input {...getInputProps(fields.id, { type: 'hidden' })} />
+								<input {...form.getHiddenInputProps('id')} />
 							) : null}
 							<input
+								id={fileFieldId}
 								aria-label="Image"
 								className="absolute top-0 left-0 z-0 size-32 cursor-pointer opacity-0"
 								onChange={(event) => {
@@ -244,30 +262,27 @@ function ImageChooser({
 									}
 								}}
 								accept="image/*"
-								{...getInputProps(fields.file, { type: 'file' })}
+								name={form.name('file')}
+								type="file"
+								aria-invalid={!!form.error('file')}
+								aria-describedby={form.error('file') ? fileErrorId : undefined}
 							/>
 						</label>
 					</div>
 					<div className="min-h-[32px] px-4 pt-1 pb-3">
-						<ErrorList id={fields.file.errorId} errors={fields.file.errors} />
+						<ErrorList id={fileErrorId} errors={[form.error('file')]} />
 					</div>
 				</div>
 				<div className="flex-1">
-					<Label htmlFor={fields.altText.id}>Alt Text</Label>
-					<Textarea
-						onChange={(e) => setAltText(e.currentTarget.value)}
-						{...getTextareaProps(fields.altText)}
-					/>
+					<Label htmlFor={altTextFieldId}>Alt Text</Label>
+					<Textarea id={altTextFieldId} {...form.getInputProps('altText')} />
 					<div className="min-h-[32px] px-4 pt-1 pb-3">
-						<ErrorList
-							id={fields.altText.errorId}
-							errors={fields.altText.errors}
-						/>
+						<ErrorList id={altTextErrorId} errors={[form.error('altText')]} />
 					</div>
 				</div>
 			</div>
 			<div className="min-h-[32px] px-4 pt-1 pb-3">
-				<ErrorList id={meta.errorId} errors={meta.errors} />
+				<ErrorList errors={[form.error()]} />
 			</div>
 		</fieldset>
 	)

@@ -1,11 +1,12 @@
-import { parseWithZod } from '@conform-to/zod'
+import { requireUserId } from '#app/utils/auth.server.ts'
+import { uploadNoteImage } from '#app/utils/storage.server.ts'
 import { parseFormData } from '@mjackson/form-data-parser'
 import { createId as cuid } from '@paralleldrive/cuid2'
-import { data, redirect, type ActionFunctionArgs } from 'react-router'
+import { validationError } from '@rvf/react-router'
+import { withZod } from '@rvf/zod'
+import { redirect, type ActionFunctionArgs } from 'react-router'
 import { z } from 'zod'
-import { requireUserId } from '#app/utils/auth.server.ts'
 import { prisma } from '#app/utils/db.server.ts'
-import { uploadNoteImage } from '#app/utils/storage.server.ts'
 import {
 	MAX_UPLOAD_SIZE,
 	NoteEditorSchema,
@@ -31,8 +32,8 @@ export async function action({ request }: ActionFunctionArgs) {
 		maxFileSize: MAX_UPLOAD_SIZE,
 	})
 
-	const submission = await parseWithZod(formData, {
-		schema: NoteEditorSchema.superRefine(async (data, ctx) => {
+	const validator = withZod(
+		NoteEditorSchema.superRefine(async (data, ctx) => {
 			if (!data.id) return
 
 			const note = await prisma.note.findUnique({
@@ -79,15 +80,11 @@ export async function action({ request }: ActionFunctionArgs) {
 				),
 			}
 		}),
-		async: true,
-	})
+	)
+	const submission = await validator.validate(formData)
 
-	if (submission.status !== 'success') {
-		return data(
-			{ result: submission.reply() },
-			{ status: submission.status === 'error' ? 400 : 200 },
-		)
-	}
+	if (submission.error)
+		return validationError(submission.error, submission.submittedData)
 
 	const {
 		id: noteId,
@@ -95,7 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
 		content,
 		imageUpdates = [],
 		newImages = [],
-	} = submission.value
+	} = submission.data
 
 	const updatedNote = await prisma.note.upsert({
 		select: { id: true, owner: { select: { username: true } } },
