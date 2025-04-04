@@ -1,5 +1,5 @@
 {
-  "name": "epic-rvf-example-baa7",
+  "name": "epic-rvf-example",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -66,6 +66,8 @@
     "@react-router/node": "^7.4.0",
     "@react-router/remix-routes-option-adapter": "^7.4.0",
     "@remix-run/server-runtime": "^2.16.2",
+    "@rvf/react-router": "^7.0.4",
+    "@rvf/zod": "^7.0.2",
     "@sentry/profiling-node": "9.8.0",
     "@sentry/react-router": "9.8.0",
     "@simplewebauthn/browser": "^13.1.0",
